@@ -1,61 +1,363 @@
+
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <title>Leaflet 最小テスト</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>標高色分け 簡易マップ</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <style>
-    html, body { margin:0; padding:0; height:100%; }
-    #status {
-      position: fixed; top: 10px; left: 10px; z-index: 9999;
-      background: #fff; padding: 12px 16px; border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,.2); font-family: monospace;
-      font-size: 13px; max-width: 80vw; line-height: 1.6;
+    html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .panel {
+      position: absolute; z-index: 1000; top: 12px; left: 12px;
+      background: rgba(255,255,255,.95); border-radius: 12px; padding: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.16); width: min(430px, calc(100vw - 24px));
     }
-    .ok { color: #060; font-weight: bold; }
-    .ng { color: #c00; font-weight: bold; }
-    #map { width: 100vw; height: 100vh; background: #def; }
+    .panel h1 { font-size: 16px; margin: 0 0 8px; }
+    .row { display: flex; gap: 6px; align-items: center; }
+    .range-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-top: 8px; align-items: end; }
+    label { font-size: 12px; font-weight: 700; color: #333; display: block; margin-bottom: 3px; }
+    input { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
+    button { padding: 9px 10px; border: 0; border-radius: 8px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+    .primary { background: #222; color: white; }
+    .muted { background: #eee; }
+    .note { font-size: 12px; color: #444; line-height: 1.45; margin-top: 8px; }
+    .small { font-size: 11px; color: #666; margin-top: 4px; line-height: 1.35; }
+    .legend {
+      position: absolute; z-index: 1000; right: 12px; bottom: 24px;
+      background: rgba(255,255,255,.94); border-radius: 12px; padding: 10px 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.16); font-size: 12px; line-height: 1.35; min-width: 205px;
+    }
+    .bar { width: 190px; height: 14px; border-radius: 999px; margin: 6px 0; background: linear-gradient(90deg,#2345a3,#38a6e8,#51c36a,#f4e85c,#f59d3d,#c74636); border: 1px solid #999; }
+    .label-row { display: flex; justify-content: space-between; gap: 8px; color: #333; }
+    .leaflet-control-layers { border-radius: 10px; }
+    .property-pin {
+      width: 22px; height: 22px; border-radius: 999px;
+      background: rgba(24,24,24,.92); border: 3px solid #fff;
+      box-shadow: 0 3px 12px rgba(0,0,0,.35);
+      box-sizing: border-box; position: relative;
+    }
+    .property-pin::after {
+      content: ''; position: absolute; left: 50%; top: 50%;
+      width: 7px; height: 7px; border-radius: 999px;
+      background: #f4e85c; transform: translate(-50%, -50%);
+    }
+    @page { size: A3 landscape; margin: 0; }
+    @media print {
+      html, body, #map { width: 420mm; height: 297mm; margin: 0; overflow: hidden; }
+      .panel, .legend, .leaflet-control-container { display: none !important; }
+      .leaflet-pane, .leaflet-tile, .leaflet-marker-icon, .leaflet-marker-shadow, .leaflet-tile-container {
+        -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+      }
+    }
+    @media (max-width: 640px) {
+      .legend { left: 12px; right: auto; bottom: 18px; }
+      .range-row { grid-template-columns: 1fr 1fr; }
+      .range-row button { grid-column: 1 / -1; }
+    }
   </style>
 </head>
 <body>
-  <div id="status">読み込み中...</div>
   <div id="map"></div>
+  <div class="panel">
+    <h1>標高色分け 簡易マップ</h1>
+    <div class="row">
+      <input id="q" placeholder="住所・地名を入力 例：東京都豊島区高田" />
+      <button class="primary" onclick="searchPlace()">検索</button>
+    </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <div class="range-row">
+      <div>
+        <label for="minElev">下限標高 m</label>
+        <input id="minElev" type="number" step="1" value="0" oninput="scheduleElevationRedraw()" />
+      </div>
+      <div>
+        <label for="maxElev">上限標高 m</label>
+        <input id="maxElev" type="number" step="1" value="40" oninput="scheduleElevationRedraw()" />
+      </div>
+      <button class="muted" onclick="setDefaultElevationRange()">0-40m</button>
+    </div>
+    <div class="small">0-40mで色分けします。低いほど青、高いほど赤。範囲外は下限未満=濃い青、上限超過=濃い赤で表示します。</div>
+
+    <div class="row" style="margin-top:8px; flex-wrap:wrap;">
+      <button class="primary" onclick="printMapPdf()">マップのみPDF化</button>
+      <button class="muted" onclick="copyLink()">現在地図のURLをコピー</button>
+      <button class="muted" onclick="clearDroppedPin()">ピン削除</button>
+      <button class="muted" onclick="resetView()">初期位置</button>
+    </div>
+    <div class="note">
+      地図上をクリックすると、査定対象地のピンを落とせます。PDF化時はピン位置を中心にして、A3横・マップのみで印刷します。
+    </div>
+  </div>
+  <div class="legend">
+    <strong>標高色分け</strong>
+    <div class="bar"></div>
+    <div class="label-row"><span id="legendMin">0m</span><span id="legendMax">40m</span></div>
+    <div style="margin-top:6px; color:#555;">目安表示です。正確な標高値・災害リスクは公式資料も併用してください。</div>
+  </div>
   <script>
-    const s = document.getElementById('status');
-    function log(msg, ok) {
-      const span = document.createElement('div');
-      span.className = ok === true ? 'ok' : (ok === false ? 'ng' : '');
-      span.textContent = (ok === true ? '✅ ' : ok === false ? '❌ ' : '・ ') + msg;
-      s.appendChild(span);
-    }
+    const initial = { lat: 35.71422262890134, lng: 139.71822750304577, z: 17 };
+    const params = new URLSearchParams(location.search);
+    const lat = parseFloat(params.get('lat')) || initial.lat;
+    const lng = parseFloat(params.get('lng')) || initial.lng;
+    const z = parseInt(params.get('z')) || initial.z;
+    const minParam = parseFloat(params.get('min'));
+    const maxParam = parseFloat(params.get('max'));
+    const pinLatParam = parseFloat(params.get('pinLat'));
+    const pinLngParam = parseFloat(params.get('pinLng'));
 
-    s.innerHTML = '';
-    log('スクリプト開始', true);
-    log('document.readyState = ' + document.readyState);
-    log('typeof L = ' + typeof L, typeof L !== 'undefined');
+    const map = L.map('map', { zoomControl: false }).setView([lat, lng], z);
+    L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
-    if (typeof L !== 'undefined') {
-      try {
-        const map = L.map('map').setView([35.7142, 139.7182], 15);
-        log('L.map() 成功', true);
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap'
-        }).addTo(map);
-        log('タイルレイヤー追加完了', true);
-        log('地図が背景に表示されていますか？');
-      } catch (e) {
-        log('エラー: ' + e.message, false);
-        console.error(e);
-      }
-    } else {
-      log('Leafletが読み込めません。CDNがブロックされている可能性。', false);
-    }
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
 
-    window.addEventListener('error', (ev) => {
-      log('window error: ' + ev.message, false);
+    const pale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '&copy; <a href="https://www.gsi.go.jp/">国土地理院</a>'
     });
+
+    const hillshade = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png', {
+      maxZoom: 16,
+      opacity: 0.28,
+      attribution: '&copy; <a href="https://www.gsi.go.jp/">国土地理院</a> 陰影起伏図'
+    });
+
+    const demCache = new Map();
+    const MAX_DEM_ZOOM = 14;
+
+    function decodeGsiElevation(r, g, b) {
+      const x = r * 65536 + g * 256 + b;
+      if (x === 8388608) return null;
+      return (x < 8388608 ? x : x - 16777216) * 0.01;
+    }
+
+    function getElevationRange() {
+      let min = parseFloat(document.getElementById('minElev').value);
+      let max = parseFloat(document.getElementById('maxElev').value);
+      if (!Number.isFinite(min)) min = 0;
+      if (!Number.isFinite(max)) max = 40;
+      if (max <= min) max = min + 1;
+      return { min, max };
+    }
+
+    function colorForElevation(elev, min, max) {
+      if (elev === null || !Number.isFinite(elev)) return [0, 0, 0, 0];
+      const t = Math.max(0, Math.min(1, (elev - min) / (max - min)));
+      const stops = [
+        [0.00, [35, 69, 163]],
+        [0.20, [56, 166, 232]],
+        [0.42, [81, 195, 106]],
+        [0.62, [244, 232, 92]],
+        [0.80, [245, 157, 61]],
+        [1.00, [199, 70, 54]]
+      ];
+      for (let i = 1; i < stops.length; i++) {
+        if (t <= stops[i][0]) {
+          const [t0, c0] = stops[i - 1];
+          const [t1, c1] = stops[i];
+          const u = (t - t0) / (t1 - t0);
+          return [
+            Math.round(c0[0] + (c1[0] - c0[0]) * u),
+            Math.round(c0[1] + (c1[1] - c0[1]) * u),
+            Math.round(c0[2] + (c1[2] - c0[2]) * u),
+            205
+          ];
+        }
+      }
+      return [199, 70, 54, 205];
+    }
+
+    function loadDemImage(z, x, y) {
+      const key = `${z}/${x}/${y}`;
+      if (demCache.has(key)) return demCache.get(key);
+      const promise = new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = 256; c.height = 256;
+          const ctx = c.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(img, 0, 0);
+          resolve(ctx.getImageData(0, 0, 256, 256).data);
+        };
+        img.onerror = reject;
+        img.src = `https://cyberjapandata.gsi.go.jp/xyz/dem_png/${z}/${x}/${y}.png`;
+      });
+      demCache.set(key, promise);
+      return promise;
+    }
+
+    const CustomElevationLayer = L.GridLayer.extend({
+      createTile: function(coords, done) {
+        const tile = document.createElement('canvas');
+        tile.width = 256; tile.height = 256;
+        const ctx = tile.getContext('2d');
+        const out = ctx.createImageData(256, 256);
+        const demZ = Math.min(coords.z, MAX_DEM_ZOOM);
+        const zoomDelta = coords.z - demZ;
+        const scale = Math.pow(2, Math.max(0, zoomDelta));
+        const demX = zoomDelta > 0 ? Math.floor(coords.x / scale) : coords.x;
+        const demY = zoomDelta > 0 ? Math.floor(coords.y / scale) : coords.y;
+        const offsetX = zoomDelta > 0 ? (coords.x % scale) * (256 / scale) : 0;
+        const offsetY = zoomDelta > 0 ? (coords.y % scale) * (256 / scale) : 0;
+        const sampleScale = zoomDelta > 0 ? scale : 1;
+        const { min, max } = getElevationRange();
+
+        loadDemImage(demZ, demX, demY).then((data) => {
+          for (let py = 0; py < 256; py++) {
+            for (let px = 0; px < 256; px++) {
+              const sx = Math.min(255, Math.floor(offsetX + px / sampleScale));
+              const sy = Math.min(255, Math.floor(offsetY + py / sampleScale));
+              const si = (sy * 256 + sx) * 4;
+              const elev = decodeGsiElevation(data[si], data[si + 1], data[si + 2]);
+              const color = colorForElevation(elev, min, max);
+              const oi = (py * 256 + px) * 4;
+              out.data[oi] = color[0];
+              out.data[oi + 1] = color[1];
+              out.data[oi + 2] = color[2];
+              out.data[oi + 3] = color[3];
+            }
+          }
+          ctx.putImageData(out, 0, 0);
+          done(null, tile);
+        }).catch(() => done(null, tile));
+        return tile;
+      }
+    });
+
+    const customElevation = new CustomElevationLayer({
+      opacity: 1,
+      attribution: '&copy; <a href="https://www.gsi.go.jp/">国土地理院</a> 標高タイル'
+    }).addTo(map);
+
+    hillshade.addTo(map);
+
+    L.control.layers(
+      { 'OpenStreetMap': osm, '淡色地図（国土地理院）': pale },
+      { '標高色分け 0-40m可変': customElevation, '陰影起伏': hillshade },
+      { position: 'topright', collapsed: false }
+    ).addTo(map);
+
+    if (Number.isFinite(minParam)) document.getElementById('minElev').value = minParam;
+    if (Number.isFinite(maxParam)) document.getElementById('maxElev').value = maxParam;
+    updateLegend();
+
+    const propertyPinIcon = L.divIcon({
+      className: '',
+      html: '<div class="property-pin"></div>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+      popupAnchor: [0, -12]
+    });
+
+    let droppedPin = null;
+    let searchMarker = null;
+    let redrawTimer = null;
+    setDroppedPin([
+      Number.isFinite(pinLatParam) ? pinLatParam : lat,
+      Number.isFinite(pinLngParam) ? pinLngParam : lng
+    ], '査定対象地・印刷中心');
+
+    map.on('click', (e) => {
+      setDroppedPin([e.latlng.lat, e.latlng.lng], '査定対象地・印刷中心');
+      updateUrl();
+    });
+
+    function updateLegend() {
+      const { min, max } = getElevationRange();
+      document.getElementById('legendMin').textContent = `${min}m`;
+      document.getElementById('legendMax').textContent = `${max}m`;
+    }
+
+    function scheduleElevationRedraw() {
+      updateLegend();
+      clearTimeout(redrawTimer);
+      redrawTimer = setTimeout(() => {
+        customElevation.redraw();
+        updateUrl();
+      }, 250);
+    }
+
+    function setDefaultElevationRange() {
+      document.getElementById('minElev').value = 0;
+      document.getElementById('maxElev').value = 40;
+      scheduleElevationRedraw();
+    }
+
+    function updateUrl() {
+      const c = map.getCenter();
+      const { min, max } = getElevationRange();
+      const pin = droppedPin ? droppedPin.getLatLng() : c;
+      const next = `${location.pathname}?lat=${c.lat.toFixed(6)}&lng=${c.lng.toFixed(6)}&z=${map.getZoom()}&min=${encodeURIComponent(min)}&max=${encodeURIComponent(max)}&pinLat=${pin.lat.toFixed(6)}&pinLng=${pin.lng.toFixed(6)}`;
+      history.replaceState(null, '', next);
+    }
+    map.on('moveend zoomend', updateUrl);
+
+    function setDroppedPin(pos, label = '査定対象地・印刷中心') {
+      if (droppedPin) map.removeLayer(droppedPin);
+      droppedPin = L.marker(pos, { icon: propertyPinIcon, riseOnHover: true })
+        .addTo(map)
+        .bindPopup(label);
+    }
+
+    function clearDroppedPin() {
+      if (!droppedPin) return;
+      map.removeLayer(droppedPin);
+      droppedPin = null;
+      updateUrl();
+    }
+
+    function centerOnDroppedPin() {
+      if (!droppedPin) {
+        alert('先に地図上をクリックして、印刷中心にするピンを落としてください。');
+        return false;
+      }
+      const pos = droppedPin.getLatLng();
+      map.setView(pos, map.getZoom(), { animate: false });
+      return true;
+    }
+
+    function printMapPdf() {
+      if (!centerOnDroppedPin()) return;
+      setTimeout(() => {
+        map.closePopup();
+        map.invalidateSize(false);
+        window.print();
+      }, 350);
+    }
+
+    async function searchPlace() {
+      const q = document.getElementById('q').value.trim();
+      if (!q) return;
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
+      try {
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        const data = await res.json();
+        if (!data.length) { alert('場所が見つかりませんでした。住所を少し変えて再検索してください。'); return; }
+        const p = data[0];
+        const pos = [parseFloat(p.lat), parseFloat(p.lon)];
+        map.setView(pos, 17);
+        if (searchMarker) map.removeLayer(searchMarker);
+        searchMarker = L.marker(pos).addTo(map).bindPopup(p.display_name).openPopup();
+      } catch (e) {
+        alert('検索に失敗しました。地図をドラッグして目的地へ移動してください。');
+      }
+    }
+
+    function copyLink() {
+      updateUrl();
+      navigator.clipboard.writeText(location.href).then(() => alert('URLをコピーしました。'));
+    }
+
+    function resetView() {
+      map.setView([initial.lat, initial.lng], initial.z);
+      setDroppedPin([initial.lat, initial.lng], '査定対象地・印刷中心');
+      updateUrl();
+    }
   </script>
 </body>
 </html>
