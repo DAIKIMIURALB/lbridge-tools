@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>Leaflet 最小テスト</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+  <style>
+    html, body { margin:0; padding:0; height:100%; }
+    #status {
+      position: fixed; top: 10px; left: 10px; z-index: 9999;
+      background: #fff; padding: 12px 16px; border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.2); font-family: monospace;
+      font-size: 13px; max-width: 80vw; line-height: 1.6;
+    }
+    .ok { color: #060; font-weight: bold; }
+    .ng { color: #c00; font-weight: bold; }
+    #map { width: 100vw; height: 100vh; background: #def; }
+  </style>
+</head>
+<body>
+  <div id="status">読み込み中...</div>
+  <div id="map"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+  <script>
+    const s = document.getElementById('status');
+    function log(msg, ok) {
+      const span = document.createElement('div');
+      span.className = ok === true ? 'ok' : (ok === false ? 'ng' : '');
+      span.textContent = (ok === true ? '✅ ' : ok === false ? '❌ ' : '・ ') + msg;
+      s.appendChild(span);
+    }
+
+    s.innerHTML = '';
+    log('スクリプト開始', true);
+    log('document.readyState = ' + document.readyState);
+    log('typeof L = ' + typeof L, typeof L !== 'undefined');
+
+    if (typeof L !== 'undefined') {
+      try {
+        const map = L.map('map').setView([35.7142, 139.7182], 15);
+        log('L.map() 成功', true);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap'
+        }).addTo(map);
+        log('タイルレイヤー追加完了', true);
+        log('地図が背景に表示されていますか？');
+      } catch (e) {
+        log('エラー: ' + e.message, false);
+        console.error(e);
+      }
+    } else {
+      log('Leafletが読み込めません。CDNがブロックされている可能性。', false);
+    }
+
+    window.addEventListener('error', (ev) => {
+      log('window error: ' + ev.message, false);
+    });
+  </script>
+</body>
+</html>
